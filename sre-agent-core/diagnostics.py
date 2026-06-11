@@ -191,10 +191,10 @@ def diagnose_and_repair(log_text: str, repo_path: str, api_key: str = None, cust
         "1. 'explanation': A string diagnosing the failure and explaining the fix.\n"
         "2. 'modifications': An array of modification objects. Each modification object MUST have:\n"
         "   - 'filepath': string path of the file relative to repository root.\n"
-        "   - 'action': 'write' (to overwrite/create file with complete contents) or 'patch' (to apply a unified diff/patch).\n"
-        "   - 'content': string containing full content for 'write', or diff text for 'patch'.\n\n"
-        "Ensure the JSON matches the schema and is valid. Use 'write' action with full contents for config files, "
-        "variables files, or small scripts, as it is much cleaner and less error-prone than applying a patch."
+        "   - 'action': 'write' (always use 'write' to overwrite/create file with complete contents. Do NOT use 'patch').\n"
+        "   - 'content': string containing the complete, full content of the file.\n\n"
+        "Ensure the JSON matches the schema and is valid. You MUST use 'write' action with full contents for all files, "
+        "as it is much cleaner and less error-prone than applying a patch."
     )
     if custom_instructions:
         system_instruction += f"\n\nAdditional SRE Instructions specific to this repository:\n{custom_instructions}"
