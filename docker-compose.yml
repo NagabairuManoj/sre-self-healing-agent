@@ -39,7 +39,10 @@ services:
     container_name: sre-frontend-dashboard
     restart: always
     ports:
-      - "80:80"  # Serves the dashboard directly on http://localhost (port 80) for production
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /etc/letsencrypt:/etc/nginx/ssl:ro
     depends_on:
       - backend
 
