@@ -39,6 +39,9 @@ jobs:
             echo "DB_NAME=sre_agent_db" >> .env
             echo "DB_USER=sre_user" >> .env
             echo "DB_PASSWORD=sre_password" >> .env
+            echo "GITHUB_CLIENT_ID=${{ secrets.GITHUB_CLIENT_ID }}" >> .env
+            echo "GITHUB_CLIENT_SECRET=${{ secrets.GITHUB_CLIENT_SECRET }}" >> .env
+            echo "JWT_SECRET=${{ secrets.JWT_SECRET }}" >> .env
             
             # Restart docker containers
             echo "Starting Docker Compose services..."
