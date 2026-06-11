@@ -1,0 +1,49 @@
+name: CD Pipeline - Deploy to GCP VM
+
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  deploy:
+    name: Deploy to GCP VM
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_IP }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            # Create project directory if it doesn't exist, otherwise pull latest code
+            if [ ! -d "/home/macthree/sre-self-healing-agent" ]; then
+              echo "Cloning repository..."
+              git clone https://github.com/NagabairuManoj/sre-self-healing-agent.git /home/macthree/sre-self-healing-agent
+            fi
+            
+            cd /home/macthree/sre-self-healing-agent
+            echo "Pulling latest changes..."
+            git pull origin master
+            
+            # Recreate .env file with secrets
+            echo "Recreating env file..."
+            echo "GITHUB_TOKEN=${{ secrets.GHA_TOKEN }}" > .env
+            echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
+            echo "GITHUB_WEBHOOK_SECRET=${{ secrets.WEBHOOK_SECRET }}" >> .env
+            echo "DB_NAME=sre_agent_db" >> .env
+            echo "DB_USER=sre_user" >> .env
+            echo "DB_PASSWORD=sre_password" >> .env
+            
+            # Restart docker containers
+            echo "Starting Docker Compose services..."
+            docker compose down
+            docker compose up --build -d
+            
+            # Print status
+            docker compose ps

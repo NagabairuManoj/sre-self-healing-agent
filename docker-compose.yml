@@ -1,0 +1,47 @@
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: sre-postgres-db
+    restart: always
+    environment:
+      POSTGRES_DB: ${DB_NAME:-sre_agent_db}
+      POSTGRES_USER: ${DB_USER:-sre_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-sre_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ./sre-agent-core
+      dockerfile: Dockerfile
+    container_name: sre-backend-api
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-sre_user}:${DB_PASSWORD:-sre_password}@db:5432/${DB_NAME:-sre_agent_db}
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      PORT: 8000
+      HOST: 0.0.0.0
+      WORKSPACE_DIR: /tmp/sre-agent-workspace
+    depends_on:
+      - db
+
+  frontend:
+    build:
+      context: ./sre-agent-frontend
+      dockerfile: Dockerfile
+    container_name: sre-frontend-dashboard
+    restart: always
+    ports:
+      - "3000:80"  # Serves the dashboard on http://localhost:3000 (map "80:80" for production)
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:

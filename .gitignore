@@ -1,0 +1,19 @@
+# Python
+sre-agent-core/venv/
+sre-agent-core/__pycache__/
+sre-agent-core/workspace/
+sre-agent-core/run-*/
+*.pyc
+
+# Node.js
+sre-agent-frontend/node_modules/
+sre-agent-frontend/dist/
+node_modules/
+
+# Secrets
+.env
+sre-agent-core/.env
+
+# OS
+.DS_Store
+Thumbs.db
