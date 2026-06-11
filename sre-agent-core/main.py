@@ -44,10 +44,20 @@ try:
 except ImportError:
     from github_client import GitHubClientWrapper
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI(
     title="SRE Self-Healing Agent Core",
     description="FastAPI application receiving GitHub workflow_run failure webhooks and triggering auto-healing workflows.",
     version="1.0.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 class DiagnoseRequest(BaseModel):

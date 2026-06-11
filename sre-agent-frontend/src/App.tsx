@@ -139,7 +139,12 @@ export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [activeTab, setActiveTab] = useState<'repos' | 'history' | 'settings'>('repos');
   const [isMockMode, setIsMockMode] = useState(true);
-  const [backendUrl, setBackendUrl] = useState('http://localhost:8000');
+  const [backendUrl, setBackendUrl] = useState(() => {
+    const hostname = window.location.hostname;
+    return (hostname === 'localhost' || hostname === '127.0.0.1')
+      ? 'http://localhost:8000'
+      : `${window.location.origin}/api`;
+  });
   const [backendHealthy, setBackendHealthy] = useState(false);
   const [customInstructions, setCustomInstructions] = useState('Ensure clean syntax. For Terraform, always append variables if missing.');
   
