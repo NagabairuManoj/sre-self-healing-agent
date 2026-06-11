@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     github_webhook_secret: Optional[str] = Field(None, validation_alias="GITHUB_WEBHOOK_SECRET")
     gemini_api_key: Optional[str] = Field(None, validation_alias="GEMINI_API_KEY")
     
+    # Database, OAuth, and JWT Settings
+    database_url: str = Field("postgresql://sre_user:sre_password@db:5432/sre_agent_db", validation_alias="DATABASE_URL")
+    github_client_id: str = Field("", validation_alias="GITHUB_CLIENT_ID")
+    github_client_secret: str = Field("", validation_alias="GITHUB_CLIENT_SECRET")
+    jwt_secret: str = Field("sre-agent-super-secret-jwt-key", validation_alias="JWT_SECRET")
+    
     # Optional settings for runner and server configuration
     port: int = Field(8000, validation_alias="PORT")
     host: str = Field("0.0.0.0", validation_alias="HOST")
@@ -45,7 +51,6 @@ class Settings(BaseSettings):
 settings = Settings()
 
 # Override properties to allow transparent fallback lookup
-# Since pydantic overrides properties when subclassing, we define standard property getters on the instance or subclass
 class ActiveSettings:
     def __init__(self, s: Settings):
         self._s = s
@@ -61,6 +66,22 @@ class ActiveSettings:
     @property
     def gemini_api_key(self) -> Optional[str]:
         return self._s.gemini_api_key_val
+
+    @property
+    def database_url(self) -> str:
+        return self._s.database_url
+
+    @property
+    def github_client_id(self) -> str:
+        return self._s.github_client_id
+
+    @property
+    def github_client_secret(self) -> str:
+        return self._s.github_client_secret
+
+    @property
+    def jwt_secret(self) -> str:
+        return self._s.jwt_secret
 
     @property
     def port(self) -> int:

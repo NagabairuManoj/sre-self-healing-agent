@@ -138,7 +138,7 @@ export default function App() {
   // App States
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [activeTab, setActiveTab] = useState<'repos' | 'history' | 'settings'>('repos');
-  const [isMockMode, setIsMockMode] = useState(true);
+  const [isMockMode, setIsMockMode] = useState(false); // Default to live mode in production
   const [backendUrl, setBackendUrl] = useState(() => {
     const hostname = window.location.hostname;
     return (hostname === 'localhost' || hostname === '127.0.0.1')
@@ -149,10 +149,28 @@ export default function App() {
   const [customInstructions, setCustomInstructions] = useState('Ensure clean syntax. For Terraform, always append variables if missing.');
   
   // Data States
-  const [repositories, setRepositories] = useState<Repository[]>(INITIAL_REPOS);
-  const [runs, setRuns] = useState<HealingRun[]>(INITIAL_RUNS);
+  const [repositories, setRepositories] = useState<Repository[]>([]);
+  const [runs, setRuns] = useState<HealingRun[]>([]);
+  const [user, setUser] = useState<{ name: string; username: string; avatarUrl: string } | null>(null);
   const [expandedRun, setExpandedRun] = useState<string | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
+
+  // Extract JWT token from redirect URL or local storage on load
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token');
+    if (token) {
+      localStorage.setItem('token', token);
+      // Clean query params
+      window.history.replaceState({}, document.title, window.location.pathname);
+      setIsLoggedIn(true);
+    } else {
+      const existingToken = localStorage.getItem('token');
+      if (existingToken) {
+        setIsLoggedIn(true);
+      }
+    }
+  }, []);
 
   // Check Backend Health
   useEffect(() => {
@@ -179,85 +197,236 @@ export default function App() {
     return () => clearInterval(interval);
   }, [backendUrl, isMockMode]);
 
-  // Simulate SRE Flow (Interactive Mock Run)
-  const triggerSimulation = () => {
-    if (isSimulating) return;
-    setIsSimulating(true);
-    setActiveTab('history');
+  // Fetch User profile, repositories, and run logs
+  useEffect(() => {
+    if (isMockMode || !isLoggedIn) {
+      setRepositories(INITIAL_REPOS);
+      setRuns(INITIAL_RUNS);
+      setUser({
+        name: "Nagabairu Manoj",
+        username: "NagabairuManoj",
+        avatarUrl: ""
+      });
+      return;
+    }
 
-    const newRunId = String(Math.floor(Math.random() * 10000000000) + 20000000000);
-    const newJobId = String(Math.floor(Math.random() * 10000000000) + 80000000000);
-    
-    // 1. Diagnosing State
-    const runDiagnostics: HealingRun = {
-      runId: newRunId,
-      jobId: newJobId,
-      jobName: 'Terraform Init and Plan',
-      repo: 'NagabairuManoj/demo-failing-infrastructure',
-      branch: 'master',
-      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
-      status: 'diagnosing',
-      explanation: 'SRE agent is currently downloading failed GitHub Action logs and analyzing the root cause...',
-      modifications: []
+    const fetchData = async () => {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setIsLoggedIn(false);
+        return;
+      }
+      try {
+        const headers = { 'Authorization': `Bearer ${token}` };
+        
+        // 1. Fetch user profile
+        const profileRes = await fetch(`${backendUrl}/auth/me`, { headers });
+        if (!profileRes.ok) throw new Error("Unauthorized");
+        const profileData = await profileRes.json();
+        setUser({
+          name: profileData.name,
+          username: profileData.username,
+          avatarUrl: profileData.avatar_url
+        });
+
+        // 2. Fetch user repositories
+        const reposRes = await fetch(`${backendUrl}/repos`, { headers });
+        if (reposRes.ok) {
+          const reposData = await reposRes.json();
+          setRepositories(reposData);
+        }
+
+        // 3. Fetch runs history
+        const runsRes = await fetch(`${backendUrl}/history`, { headers });
+        if (runsRes.ok) {
+          const runsData = await runsRes.json();
+          setRuns(runsData);
+        }
+      } catch (err) {
+        console.error("Error fetching data:", err);
+        localStorage.removeItem('token');
+        setIsLoggedIn(false);
+      }
     };
 
-    setRuns(prev => [runDiagnostics, ...prev]);
-    setExpandedRun(newRunId);
+    fetchData();
+  }, [isLoggedIn, isMockMode, backendUrl]);
 
-    // 2. Transition to Healing State after 3 seconds
-    setTimeout(() => {
-      setRuns(prev => prev.map(r => {
-        if (r.runId === newRunId) {
-          return {
-            ...r,
-            status: 'healing',
-            explanation: 'LLM diagnosed a missing input variable declaration: "bucket_name". The agent is checking out a new branch "fix/failed-run-' + newRunId + '", writing the variable definition block, and staging changes...'
-          };
+  // Poll running jobs if active
+  useEffect(() => {
+    if (isMockMode || !isLoggedIn) return;
+
+    const hasActiveJobs = runs.some(r => r.status === 'diagnosing' || r.status === 'healing');
+    if (!hasActiveJobs) return;
+
+    const interval = setInterval(async () => {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+      try {
+        const runsRes = await fetch(`${backendUrl}/history`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (runsRes.ok) {
+          const runsData = await runsRes.json();
+          setRuns(runsData);
         }
-        return r;
-      }));
+      } catch (err) {
+        console.error("Failed to poll runs status", err);
+      }
     }, 3000);
 
-    // 3. Transition to Resolved State after 6 seconds (Adds Diff and PR url)
-    setTimeout(() => {
-      setRuns(prev => prev.map(r => {
-        if (r.runId === newRunId) {
-          return {
-            ...r,
-            status: 'resolved',
-            explanation: 'Root cause identified: main.tf referenced var.bucket_name without an HCL variable declaration block. SRE Agent declared variable "bucket_name" with a default value. Applied patch, pushed fix to branch, and successfully created a Pull Request.',
-            modifications: [
-              {
-                filepath: 'main.tf',
-                action: 'write',
-                content: `@@ -20,9 +20,13 @@
- resource "aws_s3_bucket" "demo_bucket" {
--  bucket = var.bucket_name
-+  bucket = var.bucket_name
- }
-+
-+variable "bucket_name" {
-+  type    = string
-+  default = "demo-s3-bucket-simulated"
-+}`
-              }
-            ],
-            prUrl: `https://github.com/NagabairuManoj/demo-failing-infrastructure/pull/${runs.length + 1}`
-          };
+    return () => clearInterval(interval);
+  }, [runs, isMockMode, isLoggedIn, backendUrl]);
+
+  // Simulate SRE Flow (Interactive Mock Run or DB Run)
+  const triggerSimulation = async (repoId?: number) => {
+    if (isMockMode || !repoId) {
+      if (isSimulating) return;
+      setIsSimulating(true);
+      setActiveTab('history');
+
+      const newRunId = String(Math.floor(Math.random() * 10000000000) + 20000000000);
+      const newJobId = String(Math.floor(Math.random() * 10000000000) + 80000000000);
+      
+      // 1. Diagnosing State
+      const runDiagnostics: HealingRun = {
+        runId: newRunId,
+        jobId: newJobId,
+        jobName: 'Terraform Init and Plan',
+        repo: 'NagabairuManoj/demo-failing-infrastructure',
+        branch: 'master',
+        timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
+        status: 'diagnosing',
+        explanation: 'SRE agent is currently downloading failed GitHub Action logs and analyzing the root cause...',
+        modifications: []
+      };
+
+      setRuns(prev => [runDiagnostics, ...prev]);
+      setExpandedRun(newRunId);
+
+      // 2. Transition to Healing State after 3 seconds
+      setTimeout(() => {
+        setRuns(prev => prev.map(r => {
+          if (r.runId === newRunId) {
+            return {
+              ...r,
+              status: 'healing',
+              explanation: 'LLM diagnosed a missing input variable declaration: "bucket_name". The agent is checking out a new branch "fix/failed-run-' + newRunId + '", writing the variable definition block, and staging changes...'
+            };
+          }
+          return r;
+        }));
+      }, 3000);
+
+      // 3. Transition to Resolved State after 6 seconds (Adds Diff and PR url)
+      setTimeout(() => {
+        setRuns(prev => prev.map(r => {
+          if (r.runId === newRunId) {
+            return {
+              ...r,
+              status: 'resolved',
+              explanation: 'Root cause identified: main.tf referenced var.bucket_name without an HCL variable declaration block. SRE Agent declared variable "bucket_name" with a default value. Applied patch, pushed fix to branch, and successfully created a Pull Request.',
+              modifications: [
+                {
+                  filepath: 'main.tf',
+                  action: 'write',
+                  content: `@@ -20,9 +20,13 @@\n resource "aws_s3_bucket" "demo_bucket" {\n-  bucket = var.bucket_name\n+  bucket = var.bucket_name\n }\n+\n+variable "bucket_name" {\n+  type    = string\n+  default = "demo-s3-bucket-simulated"\n+}`
+                }
+              ],
+              prUrl: `https://github.com/NagabairuManoj/demo-failing-infrastructure/pull/${runs.length + 1}`
+            };
+          }
+          return r;
+        }));
+        setIsSimulating(false);
+      }, 6000);
+      return;
+    }
+
+    // Real simulation backend call
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    try {
+      setIsSimulating(true);
+      setActiveTab('history');
+      
+      const response = await fetch(`${backendUrl}/repos/${repoId}/simulate-failure`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
         }
-        return r;
-      }));
+      });
+      if (response.ok) {
+        // Fetch updated runs history
+        const runsRes = await fetch(`${backendUrl}/history`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (runsRes.ok) {
+          const runsData = await runsRes.json();
+          setRuns(runsData);
+          if (runsData.length > 0) {
+            setExpandedRun(runsData[0].runId);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Failed to trigger simulation", err);
+    } finally {
       setIsSimulating(false);
-    }, 6000);
+    }
   };
 
-  const handleToggleHealing = (id: number) => {
-    setRepositories(prev => prev.map(repo => {
-      if (repo.id === id) {
-        return { ...repo, healingEnabled: !repo.healingEnabled };
+  const handleToggleHealing = async (id: number) => {
+    if (isMockMode) {
+      setRepositories(prev => prev.map(repo => {
+        if (repo.id === id) {
+          return { ...repo, healingEnabled: !repo.healingEnabled };
+        }
+        return repo;
+      }));
+      return;
+    }
+
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    try {
+      const response = await fetch(`${backendUrl}/repos/${id}/toggle-healing`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setRepositories(prev => prev.map(repo => {
+          if (repo.id === id) {
+            return { ...repo, healingEnabled: data.healingEnabled };
+          }
+          return repo;
+        }));
       }
-      return repo;
-    }));
+    } catch (err) {
+      console.error("Failed to toggle healing", err);
+    }
+  };
+
+  const handleLogin = async () => {
+    try {
+      const response = await fetch(`${backendUrl}/auth/login`);
+      const data = await response.json();
+      if (data.url) {
+        window.location.href = data.url;
+      }
+    } catch (err) {
+      console.error("Failed to login", err);
+      window.location.href = `${backendUrl}/auth/login`;
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    setUser(null);
+    setIsLoggedIn(false);
   };
 
   const toggleMockMode = () => {
@@ -279,7 +448,7 @@ export default function App() {
             Never debug failing pipelines or drifted terraform code again. Our AI-driven SRE Agent listens to GitHub Webhooks, downloads logs, diagnoses root causes, and automatically opens Pull Requests with the code repairs.
           </p>
           
-          <button className="btn btn-primary" onClick={() => setIsLoggedIn(true)}>
+          <button className="btn btn-primary" onClick={handleLogin}>
             <GithubIcon size={18} /> Connect with GitHub
           </button>
         </div>
@@ -344,16 +513,20 @@ export default function App() {
         <div className="sidebar-footer">
           <div className="user-profile">
             <div className="user-avatar">
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-                <User size={18} color="#9ca3af" />
-              </div>
+              {user?.avatarUrl ? (
+                <img src={user.avatarUrl} alt={user.name} style={{ width: '100%', height: '100%', borderRadius: '50%' }} />
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+                  <User size={18} color="#9ca3af" />
+                </div>
+              )}
             </div>
             <div className="user-info">
-              <h4>Nagabairu Manoj</h4>
-              <p>Organization Owner</p>
+              <h4>{user?.name || 'Loading...'}</h4>
+              <p>@{user?.username || 'user'}</p>
             </div>
             <button 
-              onClick={() => setIsLoggedIn(false)} 
+              onClick={handleLogout} 
               style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', marginLeft: 'auto' }}
               title="Logout"
             >
@@ -420,7 +593,7 @@ export default function App() {
                       <div style={{ marginTop: '16px' }}>
                         <button 
                           className="btn btn-secondary" 
-                          onClick={triggerSimulation} 
+                          onClick={() => triggerSimulation(repo.id)} 
                           disabled={isSimulating}
                           style={{ width: '100%', justifyContent: 'center' }}
                         >
