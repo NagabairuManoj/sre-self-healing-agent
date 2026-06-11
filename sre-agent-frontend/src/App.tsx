@@ -565,14 +565,22 @@ export default function App() {
               <div className="grid-2">
                 {repositories.map(repo => (
                   <div className="glass-card" key={repo.id}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
-                      <div>
-                        <h3 style={{ fontSize: '18px', fontWeight: 600, color: '#fff' }}>{repo.name}</h3>
-                        <p style={{ fontSize: '12px', color: varString('text-muted') }}>Default branch: <code>{repo.branch}</code></p>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', minWidth: 0, width: '100%' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, minWidth: 0 }}>
+                        <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#fff', overflowWrap: 'break-word', wordBreak: 'break-word', lineHeight: '1.4', paddingRight: '12px' }} title={repo.name}>
+                          {repo.name}
+                        </h3>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '2px' }}>
+                          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                            Branch: <code>{repo.branch}</code>
+                          </span>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>•</span>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 500, color: repo.webhookConnected ? '#10b981' : '#f59e0b' }}>
+                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: repo.webhookConnected ? '#10b981' : '#f59e0b', boxShadow: repo.webhookConnected ? '0 0 6px #10b981' : '0 0 6px #f59e0b' }} />
+                            {repo.webhookConnected ? 'Webhook Active' : 'Webhook Pending'}
+                          </span>
+                        </div>
                       </div>
-                      <span className={`badge ${repo.webhookConnected ? 'badge-success' : 'badge-warning'}`}>
-                        {repo.webhookConnected ? 'webhook active' : 'pending'}
-                      </span>
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--border-color)' }}>
@@ -609,8 +617,17 @@ export default function App() {
 
           {activeTab === 'history' && (
             <div className="run-logs-list">
-              {runs.map(run => (
-                <div className="glass-card" key={run.runId}>
+              {runs.length === 0 ? (
+                <div className="glass-card" style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--text-secondary)' }}>
+                  <Terminal size={40} style={{ marginBottom: '16px', opacity: 0.5, marginLeft: 'auto', marginRight: 'auto', display: 'block' }} />
+                  <h3 style={{ fontSize: '18px', fontWeight: 600, color: '#fff' }}>No Healing Logs Found</h3>
+                  <p style={{ fontSize: '14px', marginTop: '8px', color: 'var(--text-secondary)' }}>
+                    When a GitHub actions workflow failure occurs on your connected repositories, the SRE Agent will analyze it and display the repair process here.
+                  </p>
+                </div>
+              ) : (
+                runs.map(run => (
+                  <div className="glass-card" key={run.runId}>
                   <div 
                     className="log-item-header"
                     onClick={() => setExpandedRun(expandedRun === run.runId ? null : run.runId)}
