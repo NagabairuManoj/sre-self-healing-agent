@@ -115,8 +115,9 @@ def call_gemini_api(prompt: str, system_instruction: str = None, api_key: str = 
     if not api_key:
         raise ValueError("GEMINI_API_KEY is not configured or set in the environment.")
         
-    models = ["gemini-2.5-flash", "gemini-1.5-flash"]
+    models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-3.5-flash", "gemini-flash-latest"]
     last_error = None
+    import time
     
     for model in models:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
@@ -136,24 +137,37 @@ def call_gemini_api(prompt: str, system_instruction: str = None, api_key: str = 
                 "parts": [{"text": system_instruction}]
             }
             
-        try:
-            logger.info(f"Sending request to Gemini API using model {model}...")
-            response = requests.post(url, headers=headers, json=contents, timeout=60)
-            if response.status_code == 200:
-                resp_json = response.json()
-                try:
-                    text = resp_json['candidates'][0]['content']['parts'][0]['text']
-                    logger.info("Successfully received response from Gemini API.")
-                    return text
-                except (KeyError, IndexError) as parse_err:
-                    last_error = f"Failed to parse response structure: {parse_err}. Response: {resp_json}"
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"Sending request to Gemini API using model {model} (attempt {attempt + 1}/{max_retries})...")
+                response = requests.post(url, headers=headers, json=contents, timeout=60)
+                
+                # Check for rate limiting / temporary service overload and retry
+                if response.status_code in (429, 503):
+                    sleep_time = 2 * (attempt + 1)
+                    logger.warning(f"Gemini API returned status {response.status_code}. Retrying in {sleep_time} seconds...")
+                    time.sleep(sleep_time)
+                    continue
+                    
+                if response.status_code == 200:
+                    resp_json = response.json()
+                    try:
+                        text = resp_json['candidates'][0]['content']['parts'][0]['text']
+                        logger.info("Successfully received response from Gemini API.")
+                        return text
+                    except (KeyError, IndexError) as parse_err:
+                        last_error = f"Failed to parse response structure: {parse_err}. Response: {resp_json}"
+                        logger.warning(last_error)
+                        break  # Parse error: no point retrying this model
+                else:
+                    last_error = f"API returned status {response.status_code}: {response.text}"
                     logger.warning(last_error)
-            else:
-                last_error = f"API returned status {response.status_code}: {response.text}"
-                logger.warning(last_error)
-        except Exception as e:
-            last_error = str(e)
-            logger.warning(f"Exception during call to model {model}: {e}")
+                    break  # Other error: no point retrying this model
+            except Exception as e:
+                last_error = str(e)
+                logger.warning(f"Exception during call to model {model}: {e}")
+                break
             
     raise RuntimeError(f"Failed to query Gemini API. Last error: {last_error}")
 
