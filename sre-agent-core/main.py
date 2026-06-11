@@ -5,7 +5,7 @@ import shutil
 import tempfile
 import requests
 import git
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any
 from fastapi import FastAPI, Request, Header, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
@@ -120,7 +120,8 @@ def process_failed_run(repo_name: str, run_id: int):
     db = SessionLocal()
     
     # 1. Create or retrieve the run record in DB
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ist_time = datetime.now(timezone(timedelta(hours=5, minutes=30)))
+    timestamp = ist_time.strftime("%Y-%m-%d %H:%M:%S")
     run_record = db.query(HealingRunRecord).filter(HealingRunRecord.id == str(run_id)).first()
     if not run_record:
         run_record = HealingRunRecord(
@@ -179,8 +180,15 @@ def process_failed_run(repo_name: str, run_id: int):
         repo = git.Repo.clone_from(clone_url, workspace_dir)
         repo.git.checkout(head_sha)
         
+        # Retrieve custom SRE instructions from database if they exist
+        custom_instructions = None
+        db_repo_obj = db.query(MonitoredRepo).filter(MonitoredRepo.name == repo_name).first()
+        if db_repo_obj and db_repo_obj.custom_instructions:
+            custom_instructions = db_repo_obj.custom_instructions
+            logger.info(f"Loaded custom SRE instructions for {repo_name}")
+            
         # 4. Run LLM diagnostics on the failed log and cloned codebase
-        analysis = diagnose_and_repair(log_text, workspace_dir)
+        analysis = diagnose_and_repair(log_text, workspace_dir, custom_instructions=custom_instructions)
         explanation = analysis.get("explanation", "No explanation provided.")
         modifications = analysis.get("modifications", [])
         
@@ -498,8 +506,8 @@ async def get_user_repos(current_user: User = Depends(get_current_user), db: Ses
                     github_id=github_id,
                     name=full_name,
                     branch=default_branch,
-                    webhook_connected=True,
-                    healing_enabled=True,
+                    webhook_connected=False,
+                    healing_enabled=False,
                     user_id=current_user.id
                 )
                 db.add(db_repo)
@@ -516,20 +524,166 @@ async def get_user_repos(current_user: User = Depends(get_current_user), db: Ses
             })
         return result
 
+def generate_custom_instructions_task(repo_id: int, user_id: int):
+    """
+    Background worker that analyzes the repository structure and recent workflow runs
+    to generate custom SRE prompts/instructions using Gemini.
+    """
+    logger.info(f"Generating custom SRE instructions for repo_id {repo_id}")
+    db = SessionLocal()
+    try:
+        db_repo = db.query(MonitoredRepo).filter(MonitoredRepo.id == repo_id).first()
+        user = db.query(User).filter(User.id == user_id).first()
+        if not db_repo or not user:
+            logger.error("Repo or User not found during custom instructions generation")
+            return
+            
+        from github import Github
+        g = Github(user.access_token)
+        repo = g.get_repo(db_repo.name)
+        
+        # 1. Gather repository files/structure context
+        try:
+            contents = repo.get_contents("")
+            files = [c.name for c in contents]
+            file_list_str = ", ".join(files)
+        except Exception as e:
+            logger.warning(f"Failed to fetch repo contents for custom instructions: {e}")
+            file_list_str = "Unknown"
+            
+        # 2. Gather recent workflow runs context
+        runs_summary = []
+        try:
+            runs = repo.get_workflow_runs()
+            for r in list(runs)[:5]:
+                runs_summary.append(
+                    f"Run ID: {r.id}, Name: {r.name}, Event: {r.event}, "
+                    f"Status: {r.status}, Conclusion: {r.conclusion or 'None'}, "
+                    f"Created: {r.created_at}"
+                )
+        except Exception as e:
+            logger.warning(f"Failed to fetch workflow runs for custom instructions: {e}")
+            runs_summary = ["None available"]
+            
+        runs_str = "\n".join(runs_summary)
+        
+        # 3. Request Gemini to generate custom instructions
+        from diagnostics import call_gemini_api
+        system_instr = (
+            "You are an expert SRE and CI/CD engineer. Your goal is to write a concise, highly specific troubleshooting guide "
+            "and instructions profile for an AI SRE Agent that will self-heal failures in this repository."
+        )
+        prompt = (
+            f"Please write a custom SRE Agent Instruction Profile for the repository: {db_repo.name}.\n\n"
+            f"--- REPOSITORY CONTEXT ---\n"
+            f"Top-level files: {file_list_str}\n\n"
+            f"--- RECENT WORKFLOW RUNS ---\n"
+            f"{runs_str}\n\n"
+            f"Draft specific guidelines for diagnosing and repairing failures in this repo. "
+            f"Identify what tech stack is used (e.g. Terraform HCL, python pytest, Node.js Jest, Nginx docker files), "
+            f"typical points of failure, what to look for in logs, and specific style guidelines for coding the fixes. "
+            f"Keep it to under 300 words, highly practical and structured."
+        )
+        
+        try:
+            instructions = call_gemini_api(prompt, system_instruction=system_instr)
+            # Remove any markdown code fences if Gemini returns them
+            instructions = instructions.strip()
+            if instructions.startswith("```"):
+                lines = instructions.splitlines()
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                instructions = "\n".join(lines).strip()
+                
+            db_repo.custom_instructions = instructions
+            db.commit()
+            logger.info(f"Custom SRE instructions successfully saved for {db_repo.name}")
+        except Exception as e:
+            logger.error(f"Failed to call Gemini API for custom instructions: {e}")
+            db_repo.custom_instructions = f"Error generating custom SRE instructions: {e}"
+            db.commit()
+    except Exception as e:
+        logger.error(f"Error in generate_custom_instructions_task: {e}", exc_info=True)
+    finally:
+        db.close()
+
 @app.post("/repos/{repo_id}/toggle-healing")
-async def toggle_healing(repo_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Toggles auto-healing status for a repository."""
+async def toggle_healing(
+    repo_id: int,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Toggles auto-healing status for a repository, creating/deleting webhook and generating custom instructions."""
     db_repo = db.query(MonitoredRepo).filter(MonitoredRepo.id == repo_id, MonitoredRepo.user_id == current_user.id).first()
     if not db_repo:
         raise HTTPException(status_code=404, detail="Repository not found")
     
-    db_repo.healing_enabled = not db_repo.healing_enabled
+    new_healing = not db_repo.healing_enabled
+    webhook_success = False
+    
+    try:
+        from github import Github
+        g = Github(current_user.access_token)
+        repo = g.get_repo(db_repo.name)
+        
+        target_url = "https://pipeline-agent.tech/webhook"
+        
+        # Find existing hook
+        existing_hook = None
+        for hook in repo.get_hooks():
+            if hook.config.get("url") == target_url:
+                existing_hook = hook
+                break
+                
+        if new_healing:
+            # We want to enable healing and ensure webhook is registered
+            if not existing_hook:
+                config = {
+                    "url": target_url,
+                    "content_type": "json",
+                    "insecure_ssl": "0"
+                }
+                if settings.github_webhook_secret:
+                    config["secret"] = settings.github_webhook_secret
+                    
+                repo.create_hook(
+                    name="web",
+                    config=config,
+                    events=["push", "workflow_run"],
+                    active=True
+                )
+                logger.info(f"Created webhook on GitHub for {db_repo.name}")
+            webhook_success = True
+            
+            # Queue repository analysis & custom SRE instructions generation in background
+            background_tasks.add_task(generate_custom_instructions_task, db_repo.id, current_user.id)
+            logger.info(f"Queued custom SRE instructions generation for {db_repo.name}")
+        else:
+            # We want to disable healing and remove webhook
+            if existing_hook:
+                existing_hook.delete()
+                logger.info(f"Deleted webhook on GitHub for {db_repo.name}")
+            webhook_success = False
+    except Exception as e:
+        logger.warning(f"Failed to manage GitHub webhook for {db_repo.name}: {e}")
+        # Fallback for local testing/permission issues
+        webhook_success = new_healing
+        if new_healing:
+            background_tasks.add_task(generate_custom_instructions_task, db_repo.id, current_user.id)
+
+    db_repo.healing_enabled = new_healing
+    db_repo.webhook_connected = webhook_success
     db.commit()
     db.refresh(db_repo)
+    
     return {
         "id": db_repo.id,
         "name": db_repo.name,
-        "healingEnabled": db_repo.healing_enabled
+        "healingEnabled": db_repo.healing_enabled,
+        "webhookConnected": db_repo.webhook_connected
     }
 
 @app.post("/repos/{repo_id}/simulate-failure")
@@ -540,16 +694,20 @@ async def simulate_failure(repo_id: int, current_user: User = Depends(get_curren
         raise HTTPException(status_code=404, detail="Repository not found")
     
     import random
+    repo_name = db_repo.name
+    repo_branch = db_repo.branch
     run_id = f"sim-{random.randint(1000000000, 9999999999)}"
     job_id = f"job-{random.randint(1000000000, 9999999999)}"
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    ist_time = datetime.now(timezone(timedelta(hours=5, minutes=30)))
+    timestamp = ist_time.strftime("%Y-%m-%d %H:%M:%S")
     
     run_record = HealingRunRecord(
         id=run_id,
         job_id=job_id,
         job_name="Terraform Init and Plan",
-        repo=db_repo.name,
-        branch=db_repo.branch,
+        repo=repo_name,
+        branch=repo_branch,
         timestamp=timestamp,
         status="diagnosing",
         explanation="SRE agent is currently downloading failed GitHub Action logs and analyzing the root cause...",
@@ -562,9 +720,9 @@ async def simulate_failure(repo_id: int, current_user: User = Depends(get_curren
     async def run_simulation():
         import asyncio
         await asyncio.sleep(3)
-        db = SessionLocal()
+        db_session = SessionLocal()
         try:
-            r = db.query(HealingRunRecord).filter(HealingRunRecord.id == run_id).first()
+            r = db_session.query(HealingRunRecord).filter(HealingRunRecord.id == run_id).first()
             if r:
                 r.status = "healing"
                 r.explanation = (
@@ -572,14 +730,14 @@ async def simulate_failure(repo_id: int, current_user: User = Depends(get_curren
                     f"The agent is checking out a new branch \"fix/failed-run-{run_id}\", "
                     "writing the variable definition block, and staging changes..."
                 )
-                db.commit()
+                db_session.commit()
         finally:
-            db.close()
+            db_session.close()
             
         await asyncio.sleep(3)
-        db = SessionLocal()
+        db_session = SessionLocal()
         try:
-            r = db.query(HealingRunRecord).filter(HealingRunRecord.id == run_id).first()
+            r = db_session.query(HealingRunRecord).filter(HealingRunRecord.id == run_id).first()
             if r:
                 r.status = "resolved"
                 r.explanation = (
@@ -603,10 +761,10 @@ async def simulate_failure(repo_id: int, current_user: User = Depends(get_curren
                         "+}"
                     )
                 }]
-                r.pr_url = f"https://github.com/{db_repo.name}/pull/{random.randint(1, 100)}"
-                db.commit()
+                r.pr_url = f"https://github.com/{repo_name}/pull/{random.randint(1, 100)}"
+                db_session.commit()
         finally:
-            db.close()
+            db_session.close()
             
     import asyncio
     asyncio.create_task(run_simulation())

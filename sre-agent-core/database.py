@@ -29,8 +29,9 @@ class MonitoredRepo(Base):
     github_id = Column(Integer, unique=True, index=True)
     name = Column(String, index=True)  # full name: owner/repo
     branch = Column(String, default="master")
-    webhook_connected = Column(Boolean, default=True)
-    healing_enabled = Column(Boolean, default=True)
+    webhook_connected = Column(Boolean, default=False)
+    healing_enabled = Column(Boolean, default=False)
+    custom_instructions = Column(Text, nullable=True)
     user_id = Column(Integer, index=True)  # owner user id (primary key)
     created_at = Column(DateTime, default=datetime.utcnow)
 

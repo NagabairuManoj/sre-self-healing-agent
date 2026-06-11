@@ -17,7 +17,8 @@ import {
   LogOut,
   User,
   ExternalLink,
-  Workflow
+  Workflow,
+  GitBranch
 } from 'lucide-react';
 
 // Custom SVG GitHub Icon since branding logos were removed from Lucide core
@@ -626,96 +627,153 @@ export default function App() {
                   </p>
                 </div>
               ) : (
-                runs.map(run => (
-                  <div className="glass-card" key={run.runId}>
-                  <div 
-                    className="log-item-header"
-                    onClick={() => setExpandedRun(expandedRun === run.runId ? null : run.runId)}
-                  >
-                    <div className="log-meta-left">
-                      {run.status === 'resolved' && <CheckCircle size={20} color="var(--color-success)" />}
-                      {run.status === 'diagnosing' && <div className="spinner"></div>}
-                      {run.status === 'healing' && <RefreshCw size={20} color="var(--color-warning)" className="spinner" />}
-                      {run.status === 'failed' && <AlertTriangle size={20} color="var(--color-error)" />}
+                (() => {
+                  // Group runs by repository name
+                  const grouped: Record<string, typeof runs> = {};
+                  runs.forEach(run => {
+                    if (!grouped[run.repo]) {
+                      grouped[run.repo] = [];
+                    }
+                    grouped[run.repo].push(run);
+                  });
+
+                  return Object.entries(grouped).map(([repoName, repoRuns]) => (
+                    <div 
+                      className="repo-group-card glass-card" 
+                      key={repoName} 
+                      style={{ 
+                        marginBottom: '24px', 
+                        padding: 0, 
+                        overflow: 'hidden',
+                        border: '1px solid rgba(255, 255, 255, 0.08)'
+                      }}
+                    >
+                      <div 
+                        className="repo-group-header" 
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px',
+                          padding: '16px 24px',
+                          background: 'rgba(255, 255, 255, 0.03)',
+                          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                          color: '#fff',
+                          fontWeight: 600,
+                          fontSize: '15px'
+                        }}
+                      >
+                        <GitBranch size={16} color="var(--color-primary)" />
+                        <span>{repoName}</span>
+                        <span className="badge" style={{ marginLeft: 'auto', background: 'rgba(99, 102, 241, 0.15)', color: 'var(--color-primary)', border: '1px solid rgba(99, 102, 241, 0.2)' }}>
+                          {repoRuns.length} {repoRuns.length === 1 ? 'log' : 'logs'}
+                        </span>
+                      </div>
                       
-                      <div className="log-title-info">
-                        <h3>Run #{run.runId} - {run.jobName}</h3>
-                        <p>{run.repo} • {run.branch} • {run.timestamp}</p>
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <span className={`badge ${
-                        run.status === 'resolved' ? 'badge-success' :
-                        run.status === 'diagnosing' ? 'badge-info' :
-                        run.status === 'healing' ? 'badge-warning' : 'badge-error'
-                      }`}>
-                        {run.status}
-                      </span>
-                      <ChevronDown 
-                        size={16} 
-                        className={`log-expand-icon ${expandedRun === run.runId ? 'expanded' : ''}`}
-                      />
-                    </div>
-                  </div>
-
-                  {expandedRun === run.runId && (
-                    <div className="log-details-expanded">
-                      <div className="analysis-card">
-                        <h4>
-                          <Info size={14} color="var(--color-primary)" /> SRE Auto-Healing Analysis
-                        </h4>
-                        <p>{run.explanation}</p>
-                      </div>
-
-                      {run.modifications.length > 0 && (
-                        <div>
-                          <h4 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '8px', color: '#fff' }}>Applied Changes</h4>
-                          {run.modifications.map((mod, i) => (
-                            <div className="diff-container" key={i}>
-                              <div className="diff-header">
-                                <span>{mod.filepath}</span>
-                                <span className="badge badge-success">{mod.action}</span>
+                      <div className="repo-group-runs" style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '24px' }}>
+                        {repoRuns.map(run => (
+                          <div 
+                            className="glass-card" 
+                            key={run.runId}
+                            style={{ 
+                              margin: 0, 
+                              background: 'rgba(0, 0, 0, 0.15)', 
+                              border: '1px solid rgba(255,255,255,0.05)',
+                              boxShadow: 'none'
+                            }}
+                          >
+                            <div 
+                              className="log-item-header"
+                              onClick={() => setExpandedRun(expandedRun === run.runId ? null : run.runId)}
+                            >
+                              <div className="log-meta-left">
+                                {run.status === 'resolved' && <CheckCircle size={20} color="var(--color-success)" />}
+                                {run.status === 'diagnosing' && <div className="spinner"></div>}
+                                {run.status === 'healing' && <RefreshCw size={20} color="var(--color-warning)" className="spinner" />}
+                                {run.status === 'failed' && <AlertTriangle size={20} color="var(--color-error)" />}
+                                
+                                <div className="log-title-info">
+                                  <h3>Run #{run.runId} - {run.jobName}</h3>
+                                  <p>{run.branch} • {run.timestamp}</p>
+                                </div>
                               </div>
-                              <div className="diff-body">
-                                {mod.content.split('\n').map((line, idx) => {
-                                  let type = 'normal';
-                                  if (line.startsWith('+')) type = 'addition';
-                                  else if (line.startsWith('-')) type = 'deletion';
-                                  
-                                  return (
-                                    <div className={`diff-line ${type}`} key={idx}>
-                                      <span className="diff-sign">
-                                        {line.startsWith('+') && '+'}
-                                        {line.startsWith('-') && '-'}
-                                      </span>
-                                      {line.startsWith('+') || line.startsWith('-') ? line.substring(1) : line}
-                                    </div>
-                                  );
-                                })}
+
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <span className={`badge ${
+                                  run.status === 'resolved' ? 'badge-success' :
+                                  run.status === 'diagnosing' ? 'badge-info' :
+                                  run.status === 'healing' ? 'badge-warning' : 'badge-error'
+                                }`}>
+                                  {run.status}
+                                </span>
+                                <ChevronDown 
+                                  size={16} 
+                                  className={`log-expand-icon ${expandedRun === run.runId ? 'expanded' : ''}`}
+                                />
                               </div>
                             </div>
-                          ))}
-                        </div>
-                      )}
 
-                      {run.prUrl && (
-                        <div style={{ marginTop: '8px' }}>
-                          <a 
-                            href={run.prUrl} 
-                            target="_blank" 
-                            rel="noopener noreferrer" 
-                            className="btn btn-primary"
-                            style={{ textDecoration: 'none' }}
-                          >
-                            View Pull Request <ExternalLink size={14} />
-                          </a>
-                        </div>
-                      )}
+                            {expandedRun === run.runId && (
+                              <div className="log-details-expanded">
+                                <div className="analysis-card">
+                                  <h4>
+                                    <Info size={14} color="var(--color-primary)" /> SRE Auto-Healing Analysis
+                                  </h4>
+                                  <p>{run.explanation}</p>
+                                </div>
+
+                                {run.modifications.length > 0 && (
+                                  <div>
+                                    <h4 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '8px', color: '#fff' }}>Applied Changes</h4>
+                                    {run.modifications.map((mod, i) => (
+                                      <div className="diff-container" key={i}>
+                                        <div className="diff-header">
+                                          <span>{mod.filepath}</span>
+                                          <span className="badge badge-success">{mod.action}</span>
+                                        </div>
+                                        <div className="diff-body">
+                                          {mod.content.split('\n').map((line, idx) => {
+                                            let type = 'normal';
+                                            if (line.startsWith('+')) type = 'addition';
+                                            else if (line.startsWith('-')) type = 'deletion';
+                                            
+                                            return (
+                                              <div className={`diff-line ${type}`} key={idx}>
+                                                <span className="diff-sign">
+                                                  {line.startsWith('+') && '+'}
+                                                  {line.startsWith('-') && '-'}
+                                                </span>
+                                                {line.startsWith('+') || line.startsWith('-') ? line.substring(1) : line}
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {run.prUrl && (
+                                  <div style={{ marginTop: '8px' }}>
+                                    <a 
+                                      href={run.prUrl} 
+                                      target="_blank" 
+                                      rel="noopener noreferrer" 
+                                      className="btn btn-primary"
+                                      style={{ textDecoration: 'none' }}
+                                    >
+                                      View Pull Request <ExternalLink size={14} />
+                                    </a>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  )}
-                </div>
-              )))}
+                  ));
+                })()
+              )}
             </div>
           )}
 

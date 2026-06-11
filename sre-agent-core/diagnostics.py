@@ -157,7 +157,7 @@ def call_gemini_api(prompt: str, system_instruction: str = None, api_key: str = 
             
     raise RuntimeError(f"Failed to query Gemini API. Last error: {last_error}")
 
-def diagnose_and_repair(log_text: str, repo_path: str, api_key: str = None) -> Dict[str, Any]:
+def diagnose_and_repair(log_text: str, repo_path: str, api_key: str = None, custom_instructions: str = None) -> Dict[str, Any]:
     """
     Diagnoses build/test logs and suggests code modifications to fix the errors.
     Returns a dictionary containing explanation and a list of modifications.
@@ -182,6 +182,9 @@ def diagnose_and_repair(log_text: str, repo_path: str, api_key: str = None) -> D
         "Ensure the JSON matches the schema and is valid. Use 'write' action with full contents for config files, "
         "variables files, or small scripts, as it is much cleaner and less error-prone than applying a patch."
     )
+    if custom_instructions:
+        system_instruction += f"\n\nAdditional SRE Instructions specific to this repository:\n{custom_instructions}"
+
     
     prompt = (
         f"--- FAILING LOG OUTPUT ---\n{preprocessed_log}\n\n"
