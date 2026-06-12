@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     
     # Database, OAuth, and JWT Settings
     database_url: str = Field("postgresql://sre_user:sre_password@db:5432/sre_agent_db", validation_alias="DATABASE_URL")
+    db_host: Optional[str] = Field(None, validation_alias="DB_HOST")
+    db_name: Optional[str] = Field(None, validation_alias="DB_NAME")
+    db_user: Optional[str] = Field(None, validation_alias="DB_USER")
+    db_password: Optional[str] = Field(None, validation_alias="DB_PASSWORD")
+    
     github_client_id: str = Field("", validation_alias="GITHUB_CLIENT_ID")
     github_client_secret: str = Field("", validation_alias="GITHUB_CLIENT_SECRET")
     jwt_secret: str = Field("sre-agent-super-secret-jwt-key", validation_alias="JWT_SECRET")
@@ -48,6 +53,16 @@ class Settings(BaseSettings):
     def gemini_api_key_val(self) -> Optional[str]:
         return self.__dict__.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY")
 
+    @property
+    def database_url_val(self) -> str:
+        db_host = self.__dict__.get("db_host") or os.environ.get("DB_HOST")
+        db_name = self.__dict__.get("db_name") or os.environ.get("DB_NAME") or "sre_agent_db"
+        db_user = self.__dict__.get("db_user") or os.environ.get("DB_USER") or "sre_user"
+        db_password = self.__dict__.get("db_password") or os.environ.get("DB_PASSWORD") or "sre_password"
+        if db_host:
+            return f"postgresql://{db_user}:{db_password}@{db_host}:5432/{db_name}"
+        return self.__dict__.get("database_url") or os.environ.get("DATABASE_URL") or "postgresql://sre_user:sre_password@db:5432/sre_agent_db"
+
 settings = Settings()
 
 # Override properties to allow transparent fallback lookup
@@ -69,7 +84,7 @@ class ActiveSettings:
 
     @property
     def database_url(self) -> str:
-        return self._s.database_url
+        return self._s.database_url_val
 
     @property
     def github_client_id(self) -> str:
