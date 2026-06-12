@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     # Optional settings for runner and server configuration
     port: int = Field(8000, validation_alias="PORT")
     host: str = Field("0.0.0.0", validation_alias="HOST")
+    base_url: str = Field("https://pipeline-agent.tech", validation_alias="BASE_URL")
     
     # Path where git repositories will be cloned temporarily for editing
     workspace_dir: str = Field("/tmp/sre-agent-workspace", validation_alias="WORKSPACE_DIR")
@@ -109,6 +110,10 @@ class ActiveSettings:
     @property
     def workspace_dir(self) -> str:
         return self._s.workspace_dir
+
+    @property
+    def base_url(self) -> str:
+        return self._s.base_url
 
 settings = ActiveSettings(Settings())
 

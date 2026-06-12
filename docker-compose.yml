@@ -23,6 +23,7 @@ services:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql://${DB_USER:-sre_user}:${DB_PASSWORD:-sre_password}@34.28.159.214:5432/${DB_NAME:-sre_agent_db}
+      BASE_URL: https://pipeline-agent.tech
       GITHUB_TOKEN: ${GITHUB_TOKEN}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET}
       GEMINI_API_KEY: ${GEMINI_API_KEY}

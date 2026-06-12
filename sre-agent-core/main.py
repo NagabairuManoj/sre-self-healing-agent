@@ -629,7 +629,7 @@ async def toggle_healing(
         g = Github(current_user.access_token)
         repo = g.get_repo(db_repo.name)
         
-        target_url = "https://pipeline-agent.tech/webhook"
+        target_url = f"{settings.base_url}/webhook"
         
         # Find existing hook
         existing_hook = None
