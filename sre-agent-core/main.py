@@ -396,13 +396,13 @@ def get_current_user(authorization: Optional[str] = Header(None), db: Session = 
 
 @app.get("/auth/login")
 async def auth_login():
-    """Returns the GitHub authorization redirect URL."""
+    """Redirects directly to GitHub authorization URL."""
     github_url = (
         f"https://github.com/login/oauth/authorize"
         f"?client_id={settings.github_client_id}"
         f"&scope=read:user,repo"
     )
-    return {"url": github_url}
+    return RedirectResponse(url=github_url)
 
 @app.get("/auth/callback")
 async def auth_callback(code: str, db: Session = Depends(get_db)):

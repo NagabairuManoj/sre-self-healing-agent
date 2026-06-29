@@ -411,17 +411,8 @@ export default function App() {
     }
   };
 
-  const handleLogin = async () => {
-    try {
-      const response = await fetch(`${backendUrl}/auth/login`);
-      const data = await response.json();
-      if (data.url) {
-        window.location.href = data.url;
-      }
-    } catch (err) {
-      console.error("Failed to login", err);
-      window.location.href = `${backendUrl}/auth/login`;
-    }
+  const handleLogin = () => {
+    window.location.href = `${backendUrl}/auth/login`;
   };
 
   const handleLogout = () => {
